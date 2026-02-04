@@ -1609,6 +1609,13 @@ if [ "\$ROLE" = "server" ]; then
         iptables -A INPUT -p tcp --dport "\$vio_port" -m comment --comment "\$TAG" -j DROP 2>/dev/null
     iptables -C OUTPUT -p tcp --sport "\$vio_port" --tcp-flags RST RST -m comment --comment "\$TAG" -j DROP 2>/dev/null || \\
         iptables -A OUTPUT -p tcp --sport "\$vio_port" --tcp-flags RST RST -m comment --comment "\$TAG" -j DROP 2>/dev/null
+    # IPv6 rules for GFK
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -C INPUT -p tcp --dport "\$vio_port" -m comment --comment "\$TAG" -j DROP 2>/dev/null || \\
+            ip6tables -A INPUT -p tcp --dport "\$vio_port" -m comment --comment "\$TAG" -j DROP 2>/dev/null || true
+        ip6tables -C OUTPUT -p tcp --sport "\$vio_port" --tcp-flags RST RST -m comment --comment "\$TAG" -j DROP 2>/dev/null || \\
+            ip6tables -A OUTPUT -p tcp --sport "\$vio_port" --tcp-flags RST RST -m comment --comment "\$TAG" -j DROP 2>/dev/null || true
+    fi
 fi
 
 # Start paqet backend
@@ -3091,8 +3098,20 @@ show_status() {
         echo -e "  Mappings:   ${GFK_PORT_MAPPINGS}"
         if [ "$ROLE" = "server" ]; then
             echo -e "  Auth code:  ${GFK_AUTH_CODE:0:8}..."
-            if iptables -C INPUT -p tcp --dport "${GFK_VIO_PORT:-45000}" -j DROP 2>/dev/null; then
+            local _vio_port="${GFK_VIO_PORT:-45000}"
+            local _input_ok=false _rst_ok=false
+            if iptables -C INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+               iptables -C INPUT -p tcp --dport "$_vio_port" -j DROP 2>/dev/null; then
+                _input_ok=true
+            fi
+            if iptables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+               iptables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -j DROP 2>/dev/null; then
+                _rst_ok=true
+            fi
+            if [ "$_input_ok" = true ] && [ "$_rst_ok" = true ]; then
                 echo -e "  Firewall:   ${GREEN}VIO port blocked${NC}"
+            elif [ "$_input_ok" = true ]; then
+                echo -e "  Firewall:   ${YELLOW}Partial (RST DROP missing)${NC}"
             else
                 echo -e "  Firewall:   ${RED}VIO port NOT blocked${NC}"
             fi
@@ -3207,10 +3226,21 @@ health_check() {
 
         # 6. Firewall (server)
         if [ "$ROLE" = "server" ]; then
-            if iptables -C INPUT -p tcp --dport "${GFK_VIO_PORT:-45000}" -j DROP 2>/dev/null; then
-                echo -e "  ${GREEN}✓${NC} VIO port ${GFK_VIO_PORT} blocked"
+            # Check both tagged and untagged rules (tagged added by _apply_firewall, untagged by install wizard)
+            local _vio_port="${GFK_VIO_PORT:-45000}"
+            if iptables -C INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+               iptables -C INPUT -p tcp --dport "$_vio_port" -j DROP 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} VIO port ${_vio_port} INPUT blocked"
             else
-                echo -e "  ${RED}✗${NC} VIO port ${GFK_VIO_PORT} NOT blocked"
+                echo -e "  ${RED}✗${NC} VIO port ${_vio_port} INPUT NOT blocked"
+                issues=$((issues + 1))
+            fi
+            # Check RST DROP rule (prevents kernel from sending RST packets)
+            if iptables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+               iptables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -j DROP 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} VIO port ${_vio_port} RST DROP in place"
+            else
+                echo -e "  ${RED}✗${NC} VIO port ${_vio_port} RST DROP missing"
                 issues=$((issues + 1))
             fi
         fi
@@ -6385,9 +6415,28 @@ main() {
     log_info "Step 5/7: Firewall setup..."
     if [ "$BACKEND" = "gfw-knocker" ]; then
         if [ "$ROLE" = "server" ]; then
-            log_info "Blocking VIO TCP port $GFK_VIO_PORT (raw socket handles it)..."
-            iptables -A INPUT -p tcp --dport "$GFK_VIO_PORT" -j DROP 2>/dev/null || true
-            command -v ip6tables &>/dev/null && ip6tables -A INPUT -p tcp --dport "$GFK_VIO_PORT" -j DROP 2>/dev/null || true
+            if ! command -v iptables &>/dev/null; then
+                log_warn "iptables not found - firewall rules cannot be applied"
+            else
+                local _vio_port="${GFK_VIO_PORT:-45000}"
+                log_info "Blocking VIO TCP port $_vio_port (raw socket handles it)..."
+                # Use same tagging as _apply_firewall for consistency
+                # Drop incoming TCP on VIO port (scapy sniffer handles it)
+                iptables -C INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                    iptables -A INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                    log_warn "Failed to add VIO INPUT DROP rule"
+                # Drop outgoing RST packets on VIO port (prevents kernel from interfering)
+                iptables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                    iptables -A OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                    log_warn "Failed to add VIO RST DROP rule"
+                # IPv6 rules
+                if command -v ip6tables &>/dev/null; then
+                    ip6tables -C INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                        ip6tables -A INPUT -p tcp --dport "$_vio_port" -m comment --comment "paqctl" -j DROP 2>/dev/null || true
+                    ip6tables -C OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || \
+                        ip6tables -A OUTPUT -p tcp --sport "$_vio_port" --tcp-flags RST RST -m comment --comment "paqctl" -j DROP 2>/dev/null || true
+                fi
+            fi
         else
             log_info "Client mode - no firewall rules needed"
         fi
