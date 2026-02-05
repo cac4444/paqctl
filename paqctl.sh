@@ -861,6 +861,11 @@ generate_config() {
     _y_ip=$(_escape_yaml "$LOCAL_IP")
     _y_mac=$(_escape_yaml "$GW_MAC")
     _y_key=$(_escape_yaml "$ENCRYPTION_KEY")
+    # Build TCP flags YAML array (default: ["PA"])
+    local _tcp_local_flags _tcp_remote_flags
+    _tcp_local_flags=$(echo "${PAQET_TCP_LOCAL_FLAG:-PA}" | sed 's/,/", "/g; s/.*/["&"]/')
+    _tcp_remote_flags=$(echo "${PAQET_TCP_REMOTE_FLAG:-PA}" | sed 's/,/", "/g; s/.*/["&"]/')
+
     if [ "$ROLE" = "server" ]; then
         cat > "$tmp_conf" << EOF
 role: "server"
@@ -876,6 +881,9 @@ network:
   ipv4:
     addr: "${_y_ip}:${LISTEN_PORT}"
     router_mac: "${_y_mac}"
+  tcp:
+    local_flag: ${_tcp_local_flags}
+    remote_flag: ${_tcp_remote_flags}
 
 transport:
   protocol: "kcp"
@@ -900,6 +908,9 @@ network:
   ipv4:
     addr: "${_y_ip}:0"
     router_mac: "${_y_mac}"
+  tcp:
+    local_flag: ${_tcp_local_flags}
+    remote_flag: ${_tcp_remote_flags}
 
 server:
   addr: "${_y_server}"
@@ -971,6 +982,8 @@ INTERFACE="${IFACE:-}"
 LOCAL_IP="${LOCAL_IP:-}"
 GATEWAY_MAC="${GW_MAC:-}"
 ENCRYPTION_KEY="${_safe_key}"
+PAQET_TCP_LOCAL_FLAG="${PAQET_TCP_LOCAL_FLAG:-PA}"
+PAQET_TCP_REMOTE_FLAG="${PAQET_TCP_REMOTE_FLAG:-PA}"
 REMOTE_SERVER="${REMOTE_SERVER:-}"
 GFK_VIO_PORT="${GFK_VIO_PORT:-}"
 GFK_VIO_CLIENT_PORT="${GFK_VIO_CLIENT_PORT:-}"
@@ -2029,6 +2042,8 @@ _load_settings() {
             LOCAL_IP) LOCAL_IP="$value" ;;
             GATEWAY_MAC) GATEWAY_MAC="$value" ;;
             ENCRYPTION_KEY) ENCRYPTION_KEY="$value" ;;
+            PAQET_TCP_LOCAL_FLAG) [[ "$value" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]] && PAQET_TCP_LOCAL_FLAG="$value" ;;
+            PAQET_TCP_REMOTE_FLAG) [[ "$value" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]] && PAQET_TCP_REMOTE_FLAG="$value" ;;
             REMOTE_SERVER) REMOTE_SERVER="$value" ;;
             GFK_VIO_PORT) [[ "$value" =~ ^[0-9]*$ ]] && GFK_VIO_PORT="$value" ;;
             GFK_VIO_CLIENT_PORT) [[ "$value" =~ ^[0-9]*$ ]] && GFK_VIO_CLIENT_PORT="$value" ;;
@@ -2175,6 +2190,8 @@ INTERFACE="${INTERFACE:-}"
 LOCAL_IP="${LOCAL_IP:-}"
 GATEWAY_MAC="${GATEWAY_MAC:-}"
 ENCRYPTION_KEY="${_safe_key}"
+PAQET_TCP_LOCAL_FLAG="${PAQET_TCP_LOCAL_FLAG:-PA}"
+PAQET_TCP_REMOTE_FLAG="${PAQET_TCP_REMOTE_FLAG:-PA}"
 REMOTE_SERVER="${REMOTE_SERVER:-}"
 GFK_VIO_PORT="${GFK_VIO_PORT:-}"
 GFK_VIO_CLIENT_PORT="${GFK_VIO_CLIENT_PORT:-}"
@@ -4246,6 +4263,28 @@ change_config() {
         LISTEN_PORT=""
     fi
 
+    # TCP flags (for both server and client)
+    echo -e "${BOLD}TCP local flag${NC} [${PAQET_TCP_LOCAL_FLAG:-PA}]:"
+    echo -e "  ${DIM}Controls TCP flags on outgoing packets (default: PA = PSH+ACK)${NC}"
+    echo -e "  ${DIM}Valid flags: S(SYN) A(ACK) P(PSH) R(RST) F(FIN) U(URG) E(ECE) C(CWR)${NC}"
+    echo -e "  ${DIM}Multiple values: PA,A (tries PA first, then A)${NC}"
+    read -p "  Flag: " input < /dev/tty || true
+    if [ -n "$input" ] && ! [[ "$input" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]]; then
+        log_warn "Invalid flags. Use: FSRPAUEC (e.g., PA or PA,A). Keeping current value."
+        input=""
+    fi
+    [ -n "$input" ] && PAQET_TCP_LOCAL_FLAG="$input"
+
+    echo -e "${BOLD}TCP remote flag${NC} [${PAQET_TCP_REMOTE_FLAG:-PA}]:"
+    echo -e "  ${DIM}Controls expected TCP flags on incoming packets (default: PA)${NC}"
+    echo -e "  ${DIM}Should match the server/client counterpart's local flag${NC}"
+    read -p "  Flag: " input < /dev/tty || true
+    if [ -n "$input" ] && ! [[ "$input" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]]; then
+        log_warn "Invalid flags. Use: FSRPAUEC (e.g., PA or PA,A). Keeping current value."
+        input=""
+    fi
+    [ -n "$input" ] && PAQET_TCP_REMOTE_FLAG="$input"
+
     # Save
     local IFACE="$INTERFACE"
     local GW_MAC="$GATEWAY_MAC"
@@ -4273,11 +4312,13 @@ change_config() {
     chmod 600 "$tmp_conf" 2>/dev/null
     (
     umask 077
-    local _y_iface _y_ip _y_mac _y_key _y_server
+    local _y_iface _y_ip _y_mac _y_key _y_server _tcp_local_flags _tcp_remote_flags
     _y_iface=$(_escape_yaml "$INTERFACE")
     _y_ip=$(_escape_yaml "$LOCAL_IP")
     _y_mac=$(_escape_yaml "$GATEWAY_MAC")
     _y_key=$(_escape_yaml "$ENCRYPTION_KEY")
+    _tcp_local_flags=$(echo "${PAQET_TCP_LOCAL_FLAG:-PA}" | sed 's/,/", "/g; s/.*/["&"]/')
+    _tcp_remote_flags=$(echo "${PAQET_TCP_REMOTE_FLAG:-PA}" | sed 's/,/", "/g; s/.*/["&"]/')
     if [ "$ROLE" = "server" ]; then
         cat > "$tmp_conf" << EOF
 role: "server"
@@ -4293,6 +4334,9 @@ network:
   ipv4:
     addr: "${_y_ip}:${LISTEN_PORT}"
     router_mac: "${_y_mac}"
+  tcp:
+    local_flag: ${_tcp_local_flags}
+    remote_flag: ${_tcp_remote_flags}
 
 transport:
   protocol: "kcp"
@@ -4316,6 +4360,9 @@ network:
   ipv4:
     addr: "${_y_ip}:0"
     router_mac: "${_y_mac}"
+  tcp:
+    local_flag: ${_tcp_local_flags}
+    remote_flag: ${_tcp_remote_flags}
 
 server:
   addr: "${_y_server}"
@@ -4370,6 +4417,8 @@ GFK_PORT_MAPPINGS="${GFK_PORT_MAPPINGS:-}"
 MICROSOCKS_PORT="${MICROSOCKS_PORT:-}"
 GFK_SERVER_IP="${GFK_SERVER_IP:-}"
 GFK_TCP_FLAGS="${GFK_TCP_FLAGS:-AP}"
+PAQET_TCP_LOCAL_FLAG="${PAQET_TCP_LOCAL_FLAG:-PA}"
+PAQET_TCP_REMOTE_FLAG="${PAQET_TCP_REMOTE_FLAG:-PA}"
 TELEGRAM_BOT_TOKEN="${_tg_token}"
 TELEGRAM_CHAT_ID="${_tg_chat}"
 TELEGRAM_INTERVAL=${_tg_interval}
@@ -6461,6 +6510,8 @@ _load_settings() {
             LOCAL_IP) LOCAL_IP="$value" ;;
             GATEWAY_MAC) GATEWAY_MAC="$value" ;;
             ENCRYPTION_KEY) ENCRYPTION_KEY="$value" ;;
+            PAQET_TCP_LOCAL_FLAG) [[ "$value" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]] && PAQET_TCP_LOCAL_FLAG="$value" ;;
+            PAQET_TCP_REMOTE_FLAG) [[ "$value" =~ ^[FSRPAUEC]+(,[FSRPAUEC]+)*$ ]] && PAQET_TCP_REMOTE_FLAG="$value" ;;
             REMOTE_SERVER) REMOTE_SERVER="$value" ;;
             GFK_VIO_PORT) [[ "$value" =~ ^[0-9]*$ ]] && GFK_VIO_PORT="$value" ;;
             GFK_VIO_CLIENT_PORT) [[ "$value" =~ ^[0-9]*$ ]] && GFK_VIO_CLIENT_PORT="$value" ;;
