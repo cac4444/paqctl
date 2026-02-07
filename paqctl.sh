@@ -1337,7 +1337,10 @@ XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="$XRAY_CONFIG_DIR/config.json"
 
 check_xray_installed() {
-    command -v xray &>/dev/null || [ -x /usr/local/bin/xray ]
+    command -v xray &>/dev/null && return 0
+    [ -x /usr/local/bin/xray ] && return 0
+    [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && return 0
+    return 1
 }
 
 install_xray() {
@@ -1469,12 +1472,15 @@ start_xray() {
         return 1
     else
         # Direct start for non-systemd
-        if [ -x /usr/local/bin/xray ]; then
+        local _xray_bin=""
+        [ -x /usr/local/bin/xray ] && _xray_bin="/usr/local/bin/xray"
+        [ -z "$_xray_bin" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && _xray_bin="/usr/local/x-ui/bin/xray-linux-amd64"
+        if [ -n "$_xray_bin" ]; then
             pkill -x xray 2>/dev/null || true
             sleep 1
-            nohup /usr/local/bin/xray run -c "$XRAY_CONFIG_FILE" > /var/log/xray.log 2>&1 &
+            nohup "$_xray_bin" run -c "$XRAY_CONFIG_FILE" > /var/log/xray.log 2>&1 &
             sleep 2
-            if pgrep -x xray &>/dev/null; then
+            if pgrep -f "xray" &>/dev/null; then
                 log_success "Xray started"
                 return 0
             fi
@@ -1496,7 +1502,7 @@ setup_xray_for_gfk() {
     local target_port
     target_port=$(echo "${GFK_PORT_MAPPINGS:-14000:443}" | cut -d: -f2 | cut -d, -f1)
 
-    if pgrep -x xray &>/dev/null; then
+    if pgrep -x xray &>/dev/null || pgrep -x xray-linux-amd64 &>/dev/null; then
         XRAY_PANEL_DETECTED=true
         log_info "Existing Xray detected — adding SOCKS5 alongside panel..."
 
@@ -1865,7 +1871,7 @@ echo \$! > /run/paqet-backend.pid
 (umask 077; touch /var/log/gfk-backend.log)
 if [ "\$ROLE" = "server" ]; then
     # Start Xray if available
-    if command -v xray &>/dev/null || [ -x /usr/local/bin/xray ]; then
+    if command -v xray &>/dev/null || [ -x /usr/local/bin/xray ] || [ -x /usr/local/x-ui/bin/xray-linux-amd64 ]; then
         if ! pgrep -f "xray run" &>/dev/null; then
             systemctl start xray 2>/dev/null || xray run -c /usr/local/etc/xray/config.json &>/dev/null &
             sleep 2
@@ -2978,7 +2984,7 @@ start_gfk_backend() {
 
     if [ "$ROLE" = "server" ]; then
         # Start Xray if not running
-        if command -v xray &>/dev/null || [ -x /usr/local/bin/xray ]; then
+        if command -v xray &>/dev/null || [ -x /usr/local/bin/xray ] || [ -x /usr/local/x-ui/bin/xray-linux-amd64 ]; then
             if ! pgrep -f "xray run" &>/dev/null; then
                 systemctl start xray 2>/dev/null || xray run -c /usr/local/etc/xray/config.json &>/dev/null &
                 sleep 2
@@ -5799,7 +5805,10 @@ EOF
 }
 
 check_xray_installed() {
-    command -v xray &>/dev/null || [ -x /usr/local/bin/xray ]
+    command -v xray &>/dev/null && return 0
+    [ -x /usr/local/bin/xray ] && return 0
+    [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && return 0
+    return 1
 }
 
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
@@ -5903,12 +5912,15 @@ start_xray() {
         log_error "Failed to start Xray after 3 attempts"
         return 1
     else
-        if [ -x /usr/local/bin/xray ]; then
+        local _xray_bin=""
+        [ -x /usr/local/bin/xray ] && _xray_bin="/usr/local/bin/xray"
+        [ -z "$_xray_bin" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && _xray_bin="/usr/local/x-ui/bin/xray-linux-amd64"
+        if [ -n "$_xray_bin" ]; then
             pkill -x xray 2>/dev/null || true
             sleep 1
-            nohup /usr/local/bin/xray run -c "$XRAY_CONFIG_FILE" > /var/log/xray.log 2>&1 &
+            nohup "$_xray_bin" run -c "$XRAY_CONFIG_FILE" > /var/log/xray.log 2>&1 &
             sleep 2
-            if pgrep -x xray &>/dev/null; then
+            if pgrep -f "xray" &>/dev/null; then
                 log_success "Xray started"
                 return 0
             fi
@@ -5922,7 +5934,7 @@ setup_xray_for_gfk() {
     local target_port
     target_port=$(echo "${GFK_PORT_MAPPINGS:-14000:443}" | cut -d: -f2 | cut -d, -f1)
 
-    if pgrep -x xray &>/dev/null; then
+    if pgrep -x xray &>/dev/null || pgrep -x xray-linux-amd64 &>/dev/null; then
         XRAY_PANEL_DETECTED=true
         log_info "Existing Xray detected — adding SOCKS5 alongside panel..."
 
