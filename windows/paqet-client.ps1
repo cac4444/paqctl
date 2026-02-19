@@ -49,7 +49,7 @@ $ErrorActionPreference = "Stop"
 # Directories and pinned versions (for stability - update after testing new releases)
 $InstallDir = "C:\paqet"
 $PaqetExe = "$InstallDir\paqet_windows_amd64.exe"
-$PaqetVersion = "v1.0.0-alpha.16"   # Pinned paqet version
+$PaqetVersionPinned = "v1.0.0-alpha.17"   # Fallback if GitHub API unreachable
 $GfkDir = "$InstallDir\gfk"
 $ConfigFile = "$InstallDir\config.yaml"
 $SettingsFile = "$InstallDir\settings.conf"
@@ -70,6 +70,18 @@ function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Cyan }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err { Write-Host "[ERROR] $args" -ForegroundColor Red }
+
+# Fetch latest paqet version from GitHub, fall back to pinned
+function Get-LatestPaqetVersion {
+    try {
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/hanselime/paqet/releases/latest" -TimeoutSec 10
+        if ($response.tag_name -match '^v?\d+\.\d+\.\d+') {
+            return $response.tag_name
+        }
+    } catch {}
+    return $PaqetVersionPinned
+}
+$PaqetVersion = Get-LatestPaqetVersion
 
 # Input validation (security: prevent config injection)
 function Test-ValidIP {

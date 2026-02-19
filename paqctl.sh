@@ -32,7 +32,7 @@ fi
 VERSION="1.0.0"
 
 # Pinned versions for stability (update these after testing new releases)
-PAQET_VERSION_PINNED="v1.0.0-alpha.16"
+PAQET_VERSION_PINNED="v1.0.0-alpha.17"
 XRAY_VERSION_PINNED="v26.2.4"
 GFK_VERSION_PINNED="v1.0.0"
 
@@ -2229,7 +2229,7 @@ create_management_script() {
 VERSION="1.0.0"
 
 # Pinned versions for stability (update these after testing new releases)
-PAQET_VERSION_PINNED="v1.0.0-alpha.16"
+PAQET_VERSION_PINNED="v1.0.0-alpha.17"
 XRAY_VERSION_PINNED="v26.2.4"
 GFK_VERSION_PINNED="v1.0.0"
 
@@ -5905,7 +5905,13 @@ install_additional_backend() {
 
 _install_paqet_components() {
     log_info "Downloading paqet binary..."
-    if ! download_paqet "$PAQET_VERSION_PINNED"; then
+    local _paqet_ver
+    _paqet_ver=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+    if [ -z "$_paqet_ver" ] || ! _validate_version_tag "$_paqet_ver"; then
+        _paqet_ver="$PAQET_VERSION_PINNED"
+    fi
+    log_info "Using paqet ${_paqet_ver}"
+    if ! download_paqet "$_paqet_ver"; then
         log_error "Failed to download paqet"
         return 1
     fi
@@ -7362,9 +7368,12 @@ main() {
         PAQET_VERSION="$GFK_VERSION_PINNED"
         log_info "Using GFK ${PAQET_VERSION} (pinned for stability)"
     else
-        # Use pinned version for stability (update command can get latest)
-        PAQET_VERSION="$PAQET_VERSION_PINNED"
-        log_info "Installing paqet ${PAQET_VERSION} (pinned for stability)"
+        # Fetch latest version from GitHub, fall back to pinned if API unreachable
+        PAQET_VERSION=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+        if [ -z "$PAQET_VERSION" ] || ! _validate_version_tag "$PAQET_VERSION"; then
+            PAQET_VERSION="$PAQET_VERSION_PINNED"
+        fi
+        log_info "Installing paqet ${PAQET_VERSION}"
         download_paqet "$PAQET_VERSION"
     fi
     echo ""
