@@ -271,44 +271,6 @@ check_dependencies() {
         install_package openssl || log_warn "Could not install openssl"
     fi
 
-    # libpcap is required by paqet
-    install_libpcap
-}
-
-install_libpcap() {
-    log_info "Checking for libpcap..."
-
-    # Check if already available
-    if ldconfig -p 2>/dev/null | grep -q libpcap; then
-        log_success "libpcap already installed"
-        return 0
-    fi
-
-    case "$PKG_MANAGER" in
-        apt) install_package libpcap-dev ;;
-        dnf|yum) install_package libpcap-devel ;;
-        pacman) install_package libpcap ;;
-        zypper) install_package libpcap-devel ;;
-        apk) install_package libpcap-dev ;;
-        *) log_warn "Please install libpcap manually for your distribution"; return 1 ;;
-    esac
-
-    # Fedora/RHEL: ensure libpcap.so.1 symlink exists (package may only install versioned .so)
-    if [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
-        if ! ldconfig -p 2>/dev/null | grep -q 'libpcap\.so\.1 '; then
-            local _pcap_lib
-            _pcap_lib=$(find /usr/lib64 /usr/lib /lib64 /lib -name 'libpcap.so.*' -type f 2>/dev/null | head -1)
-            if [ -n "$_pcap_lib" ]; then
-                local _libdir
-                _libdir=$(dirname "$_pcap_lib")
-                if [ ! -e "${_libdir}/libpcap.so.1" ]; then
-                    log_info "Creating libpcap.so.1 symlink for Fedora/RHEL compatibility"
-                    ln -sf "$_pcap_lib" "${_libdir}/libpcap.so.1"
-                fi
-                ldconfig 2>/dev/null || true
-            fi
-        fi
-    fi
 }
 
 detect_arch() {
@@ -580,6 +542,7 @@ detect_network() {
     log_info "Local IP:  ${DETECTED_IP:-unknown}"
     log_info "Gateway:   ${DETECTED_GATEWAY:-unknown}"
     log_info "GW MAC:    ${DETECTED_GW_MAC:-unknown}"
+    log_info "end of auto detect"
 }
 
 #═══════════════════════════════════════════════════════════════════════
@@ -2329,6 +2292,7 @@ detect_network() {
     log_info "Local IP:  ${DETECTED_IP:-unknown}"
     log_info "Gateway:   ${DETECTED_GATEWAY:-unknown}"
     log_info "GW MAC:    ${DETECTED_GW_MAC:-unknown}"
+
 }
 
 _load_settings() {
