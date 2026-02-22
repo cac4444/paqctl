@@ -2292,7 +2292,7 @@ detect_network() {
     log_info "Local IP:  ${DETECTED_IP:-unknown}"
     log_info "Gateway:   ${DETECTED_GATEWAY:-unknown}"
     log_info "GW MAC:    ${DETECTED_GW_MAC:-unknown}"
-
+    log_info "end of auto detect"
 }
 
 _load_settings() {
